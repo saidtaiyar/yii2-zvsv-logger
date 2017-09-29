@@ -11,7 +11,7 @@ class Init
     {
         $composer = $event->getComposer();
 
-        file_put_contents('test.txt', 'install');
+        file_put_contents(__DIR__.'/test.txt', 'install');
     }
 
     public static function postAutoloadDump(Event $event)
@@ -26,7 +26,7 @@ class Init
     {
         $installedPackage = $event->getOperation()->getPackage();
 
-        file_put_contents('test.txt', 'install');
+        file_put_contents(__DIR__.'/test.txt', 'install');
     }
 
     public static function warmCache(Event $event)
