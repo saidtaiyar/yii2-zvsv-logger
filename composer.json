@@ -24,9 +24,9 @@
         }
     },
     "scripts": {
-        "post-update-cmd": "zvsv\\Logger\\Init::postUpdate",
+        "post-update-cmd": "zvsv\\logger\\Init::postUpdate",
         "post-package-install": [
-            "zvsv\\Logger\\MyClass::postPackageInstall"
+            "zvsv\\logger\\Init::postPackageInstall"
         ]
     }
 }
