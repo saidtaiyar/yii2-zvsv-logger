@@ -43,7 +43,7 @@ class Log
             $files[] = '/logs/default';
         }
 
-        $this->writeInDb($file, $content, $params);
+        //$this->writeInDb($file, $content, $params);
 
         foreach ($files AS $item_file){
             $this->writeInFile($item_file, $content, $params);
@@ -56,7 +56,7 @@ class Log
      * @param $content
      * @param $params
      */
-    protected function writeInDb($file, $content, $params) {
+    /*protected function writeInDb($file, $content, $params) {
         Yii::$app->db->createCommand()->insert('{{%logs}}', [
             'file' => $file ? ltrim(substr($file, 0, 5) === '/logs' ? substr($file, 5) : $file, '/') : NULL,
             'user_id' => isset(Yii::$app->user->id) ? Yii::$app->user->id : NULL,
@@ -66,56 +66,7 @@ class Log
             'params' => json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'date' => new Expression('NOW()'),
         ])->execute();
-		//Отправка Email в случае если это надо
-		if( $send_email = IssetVal::set($params, 'send_email', false) ) {
-			$emails = [];
-
-			if(is_array($send_email)){
-				$types_send = $send_email;
-			} else if($send_email === true){
-				$types_send = ['admin_log'];
-			} else {
-				return false;
-			}
-
-			foreach($types_send AS $item){
-				if(is_array(Yii::$app->params['emails'][$item])) {
-					$emails = array_merge($emails, Yii::$app->params['emails'][$item]);
-				} else {
-					$emails[] = Yii::$app->params['emails'][$item];
-				}
-			}
-
-			if(!$file) {
-				$file = 'Файл не указан';
-			}
-			$theme = 'Logger: ' . $file;
-			$message = "Логгером было добавлено новое сообщение. Логгер был вызван с параметром дублирования сообщения на почту\n\n";
-			$message .= 'Домен: ' . Yii::$app->request->serverName . "\n";
-			$message .= 'Страница: ' . Yii::$app->request->url . "\n";
-			$message .= 'Referer: ' . Yii::$app->request->referrer . "\n\n";
-			$callFile = isset($params['call_file']) ? $params['call_file'] : '';
-			$callLine = isset($params['call_line']) ? $params['call_line'] : '';
-			if($callFile) {
-				$message .= 'File: ' . $callFile . "\n";
-			}
-			if($callLine) {
-				$message .= 'Line: ' . $callLine . "\n";
-			}
-			if($callFile or $callLine) {
-				$message .= "\n";
-			}
-			$message .= print_r($content, true);
-			/*\Yii::$app->mailerSupport->compose()
-				->setTo($emails)
-				->setFrom('tf-mailer-2017@yandex.ru')
-				->setSubject($theme)
-				->setTextBody($message)
-				->send();*/
-			//Support::customMailES($emails, $theme, $message, $callFile, $callLine);
-			Support::customLimitedMail($emails, $theme, $message, $callFile, $callLine);
-		}
-    }
+    }*/
 
     /**
      * Пишем в файл
@@ -162,6 +113,51 @@ class Log
 
         fwrite($fp, $content);
 		fclose($fp);
+
+        //Отправка Email в случае если это надо
+        if( $send_email = IssetVal::set($params, 'send_email', false) ) {
+            $emails = [];
+
+            if(is_array($send_email)){
+                $types_send = $send_email;
+            } else if($send_email === true){
+                $types_send = ['admin_log'];
+            } else {
+                return false;
+            }
+
+            foreach($types_send AS $item){
+                if(is_array(Yii::$app->params['emails'][$item])) {
+                    $emails = array_merge($emails, Yii::$app->params['emails'][$item]);
+                } else {
+                    $emails[] = Yii::$app->params['emails'][$item];
+                }
+            }
+
+            if(!$file) {
+                $file = 'Файл не указан';
+            }
+            $theme = 'Logger: ' . $file;
+            $message = "Логгером было добавлено новое сообщение. Логгер был вызван с параметром дублирования сообщения на почту\n\n";
+            $message .= 'Домен: ' . Yii::$app->request->serverName . "\n";
+            $message .= 'Страница: ' . Yii::$app->request->url . "\n";
+            $message .= 'Referer: ' . Yii::$app->request->referrer . "\n\n";
+            $callFile = isset($params['call_file']) ? $params['call_file'] : '';
+            $callLine = isset($params['call_line']) ? $params['call_line'] : '';
+            if($callFile) {
+                $message .= 'File: ' . $callFile . "\n";
+            }
+            if($callLine) {
+                $message .= 'Line: ' . $callLine . "\n";
+            }
+            if($callFile or $callLine) {
+                $message .= "\n";
+            }
+            $message .= print_r($content, true);
+
+            //Support::customMailES($emails, $theme, $message, $callFile, $callLine);
+            Support::customLimitedMail($emails, $theme, $message, $callFile, $callLine);
+        }
     }
 	
 	public static function newFilePath($file_path, $only_file){

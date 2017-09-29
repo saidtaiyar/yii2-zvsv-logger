@@ -22,5 +22,11 @@
         "psr-4": {
 			"zvsv\\logger\\": "logger/"
         }
+    },
+    "scripts": {
+        "post-update-cmd": "zvsv\\Logger\\Init::postUpdate",
+        "post-package-install": [
+            "zvsv\\Logger\\MyClass::postPackageInstall"
+        ]
     }
 }
