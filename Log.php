@@ -3,10 +3,10 @@
 namespace zvsv\logger;
 
 use app\models\helpers\IssetVal;
-use app\models\helpers\Support;
 use Yii;
 use yii\db\Expression;
 use yii\db\Query;
+use yii\helpers\FileHelper;
 
 class Log
 {	
@@ -21,10 +21,11 @@ class Log
     protected function writeInDb($file, $content, $params) {
         //Если таблицы не существует, надо создать
         if (\Yii::$app->db->getTableSchema('{{%logs}}', true) === null) {
-            Yii::$app->db->createCommand()->execute("
-                CREATE TABLE `{{%logs}}` (
+            Yii::$app->db->createCommand()->setSql("
+                CREATE TABLE {{%logs}} (
                   `id` int(11) NOT NULL AUTO_INCREMENT,
                   `file` varchar(250) DEFAULT NULL,
+                  `host` varchar(250) DEFAULT NULL,
                   `users_id` text,
                   `controller` varchar(100) DEFAULT NULL,
                   `action` varchar(100) DEFAULT NULL,
@@ -36,27 +37,32 @@ class Log
                   `call_count` int(11) DEFAULT NULL COMMENT 'Кол-во вызовов с одинаковой контрольной суммой',
                   PRIMARY KEY (`id`),
                   UNIQUE KEY `uniq` (`hash`)
-                ) ENGINE=InnoDB AUTO_INCREMENT=51996 DEFAULT CHARSET=utf8 ROW_FORMAT=COMPACT;
-            ");
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+            ")->execute();
         }
 
-        $user_id = isset(Yii::$app->user->id) ? Yii::$app->user->id : NULL;
+        $host = Yii::$app->request->serverName;
+        $user_id = isset(Yii::$app->user->id) ? Yii::$app->user->id : 0;
         $currentController = isset(Yii::$app->params['currentController']) ? Yii::$app->params['currentController'] : NULL;
         $currentAction = isset(Yii::$app->params['currentAction']) ? Yii::$app->params['currentAction'] : NULL;
-        $hash = md5($currentController.$currentAction.$file.print_r($content, true));
+        $hash = md5($host.$currentController.$currentAction.$file.print_r($content, true));
 
-        echo Yii::$app->db->createCommand()->insert('{{%logs}}', [
+        $insert = Yii::$app->db->createCommand()->insert('{{%logs}}', [
             'file' => $file ? $file : NULL,
+            'host' => $host,
             'controller' => $currentController,
             'action' => $currentAction,
             'content' => json_encode($content, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'params' => json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            'date' => new Expression('NOW()'),
+            'date_add' => new Expression('NOW()'),
             'hash' => $hash,
-            'users_id' => ','.$user_id //Сбор всех id пользователей
-        ])->getRawSql(); exit;
+            'users_id' => ','.$user_id, //Сбор всех id пользователей
+            'call_count' => 1
+        ])->getRawSql();
+        $insert .= " ON DUPLICATE KEY UPDATE 
+                `date_update` = NOW(), `users_id` = concat(`users_id`, ',".$user_id."'), call_count = call_count + 1;";
 
-            //->execute();
+        Yii::$app->db->createCommand()->setSql($insert)->execute();
 
         //Отправка Email в случае если это надо
         if( $send_email = IssetVal::set($params, 'send_email', false) ) {
@@ -99,7 +105,7 @@ class Log
             }
             $message .= print_r($content, true);
 
-            Support::customLimitedMail($emails, $theme, $message, $callFile, $callLine);
+            self::customLimitedMail($emails, $theme, $message, $hash);
         }
     }
 	
@@ -155,12 +161,13 @@ class Log
         $size = isset($params['max_file_size']) ? $params['max_file_size'] : 10 ;
 
         $file = Yii::getAlias('@app').$file;
-        Files::createPath($file, true, true);
 
         $file_path_arr = explode('/', $file);
         $only_file = $file_path_arr[count($file_path_arr)-1];
         $file_path = str_replace($only_file, '', $file);
         $only_file = explode('.', $only_file);
+
+        FileHelper::createDirectory($file_path);
 
         //Берем последний файл
         $file = glob("{$file_path}{$only_file[0]}-[0-9]*.log");
@@ -198,15 +205,13 @@ class Log
      * @param mixed $emails - адреса, на которые нужно отправить письмо (строка или массив строк)
      * @param string $theme - тема сообщения
      * @param string $message - текст сообщения
-     * @param string $file - название файла, повлекшего отправку сообщения
-     * @param integer $line - номер строки, на которой произошло событие (например вызов функции или ошибка), повлекшее
-     *                        отправку сообщения
+     * @param string $hash - контрольная сумма письма
      * @param boolean $html - формат отправляемого письма - html или простой текст
      * @param integer $periodQty - количество данных писем, которое разрешается отправить за выбранный интервал времени
      * @param integer $periodTime - интервал времени (в секундах)
      * @throws Exception
      */
-    public function customLimitedMail($emails, $theme, $message, $file = '', $line = 0, $html = false, $periodQty = 5, $periodTime = 7200) {
+    public static function customLimitedMail($emails, $theme, $message, $hash, $html = false, $periodQty = 5, $periodTime = 7200) {
         if(is_string($emails)) {
             $emails = [$emails];
         }
@@ -214,14 +219,14 @@ class Log
             throw new Exception('Wrong arguments!');
         }
         $from = isset(Yii::$app->components['mailerSupport']['transport']['username']) ? Yii::$app->components['mailerSupport']['transport']['username'] : 'rassylschik.logov@gmail.com';
-        $check = self::checkPeriod($file, $line, $periodQty, $periodTime, $from);
-        if($check['qty'] >= $periodQty) {
+        $check = self::checkPeriod($hash, $periodTime, $from);
+
+        if(($check['qty']-1) >= $periodQty) {
             return false;
         }
-        if($check['qty'] >= ($periodQty - 1)) {
+        if(($check['qty']-1) >= ($periodQty - 1)) {
             $message .= ($html ? '<br><br>' : "\n\n");
-            $message .= 'Превышен лимит отправляемых сообщений для данной комбинации файл + строка (' . $file . ':' .
-                $line . ')! Первое отправлено: ' . $check['first'] . ', всего отправлено (включая данное): ' . ($check['qty'] + 1);
+            $message .= 'Превышен лимит отправляемых сообщений для данной комбинации `'.$hash.'`. Первое отправлено: ' . $check['first'] . ', всего отправлено (включая данное): ' . ($check['qty']);
         }
         try {
             \Yii::$app->mailerSupport->compose()
@@ -235,30 +240,20 @@ class Log
         }
     }
 
-    public static function checkPeriod($file, $line, $periodQty, $periodTime, $from = '') {
-        if(empty($file) or $line < 1) {
-            $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2);
-            $call = isset($trace[1]) ? $trace[1] : [];
-            $file = isset($call['file']) ? $call['file'] : '';
-            $line = isset($call['line']) ? $call['line'] : '';
-        }
-        $file = trim(str_replace(Yii::getAlias('@app/'), '', $file));
+    /**
+     * Проверка чтоб не было частых отправкок одних и тех же сообщений (для случаев если баг начинает сппимит в логах)
+     */
+    public static function checkPeriod($hash, $periodTime, $from = '') {
+
         try {
-            $equals = (new Query)->select(['send'])->from('{{%logs}}')->where([
+            $equals = (new Query)->select('*')->from('{{%logs}}')->where([
                 'and',
-                ['line' => $line],
-                ['file' => $file],
-                ['>=', 'send', new Expression('DATE_SUB(NOW(), INTERVAL ' . $periodTime . ' SECOND)')]
-            ])->column();
-            $qty = count($equals);
-            $first = reset($equals);
-            if($qty < $periodQty) {
-                (new Query)->createCommand()->insert('{{%logs}}', [
-                    'line' => $line,
-                    'file' => $file,
-                    'send' => new Expression('NOW()')
-                ])->execute();
-            }
+                ['hash' => $hash],
+                ['>=', 'date_update', new Expression('DATE_SUB(NOW(), INTERVAL ' . $periodTime . ' SECOND)')]
+            ])->one();
+            $qty = $equals['call_count'];
+            $first = $equals['date_add'];
+
             $answer = ['qty' => $qty, 'first' => $first];
         } catch(\Exception $e) {
             self::errorDuringErrorHandling($e, $from);
@@ -279,4 +274,13 @@ class Log
 		$only_file = $only_file[0].'-'.date("YmdHis", time()).(isset($only_file[1]) ? '.'.$only_file[1] : '');
 		return $file_path.$only_file.'.log';
 	}
+
+    public static function errorDuringErrorHandling($e, $from = '') {
+        $str = '==================== ' . date('d.m.Y, H:i:s', time() + 3600 * 3) . " ==============================\n";
+        $str .= "Произошла ошибка при попытке отправить сообщение об ошибке!\n";
+        $str .= "Отправляю с ящика: <{$from}>\n";
+        $str .= $e->getCode() . ': ' . $e->getMessage() . "\n";
+        $str .= $e->getFile() . ': ' . $e->getLine() . "\n\n";
+        file_put_contents(Yii::getAlias('@app') . '/logs/ErrorDuringSendingError.log', $str, FILE_APPEND);
+    }
 }
