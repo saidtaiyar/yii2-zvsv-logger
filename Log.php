@@ -41,15 +41,18 @@ class Log
         }
 
         $user_id = isset(Yii::$app->user->id) ? Yii::$app->user->id : NULL;
+        $currentController = isset(Yii::$app->params['currentController']) ? Yii::$app->params['currentController'] : NULL;
+        $currentAction = isset(Yii::$app->params['currentAction']) ? Yii::$app->params['currentAction'] : NULL;
+        $hash = md5($currentController.$currentAction.$file.print_r($content, true));
 
         echo Yii::$app->db->createCommand()->insert('{{%logs}}', [
-            'file' => $file ? ltrim(substr($file, 0, 5) === '/logs' ? substr($file, 5) : $file, '/') : NULL,
-            'controller' => isset(Yii::$app->params['currentController']) ? Yii::$app->params['currentController'] : NULL,
-            'action' => isset(Yii::$app->params['currentAction']) ? Yii::$app->params['currentAction'] : NULL,
+            'file' => $file ? $file : NULL,
+            'controller' => $currentController,
+            'action' => $currentAction,
             'content' => json_encode($content, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'params' => json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'date' => new Expression('NOW()'),
-            'hash' => md5($file.print_r($content, true)),
+            'hash' => $hash,
             'users_id' => ','.$user_id //Сбор всех id пользователей
         ])->getRawSql(); exit;
 
